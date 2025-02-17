@@ -1,7 +1,6 @@
-web: npx tsx index.ts
 import express from 'express';
 import cors from 'cors';
-//
+
 const app = express();
 const PORT = 3001;
 
@@ -58,27 +57,17 @@ const updateSortedOrders = (orderType: 'buy' | 'sell') => {
 
 /**
  * Função que executa o matching para uma ordem limite de COMPRA.
- * Se houver ordens de venda (limit) com preço menor ou igual ao preço da ordem de compra,
- * o sistema executa a ordem como se fosse a mercado.
- * Durante o matching, as ordens consumidas são atualizadas:
- * - Se parcialmente preenchidas: o "shares" é decrementado e o status é "partial".
- * - Se totalmente preenchidas: o status é "executed" e a ordem será removida do orderBook.
- *
- * Retorna um objeto com os detalhes da execução, incluindo as operações realizadas e,
- * se a ordem não for totalmente preenchida, o restante da ordem (a ser adicionada no orderBook).
  */
 function matchLimitBuyOrder(newBuy: Order) {
   console.log(`[matchLimitBuyOrder] Iniciando matching para ordem de COMPRA:`, newBuy);
-  // Filtra as ordens de venda que podem casar: mesmo ativo e preço menor ou igual ao preço da compra
   let matchingSellOrders = orderBook.filter(
     o => o.type === 'sell' && o.asset === newBuy.asset && o.price <= newBuy.price
   );
-  // Ordena as ordens de venda do menor para o maior preço
   matchingSellOrders.sort((a, b) => a.price - b.price);
 
-  let remainingShares = newBuy.shares; // quantidade que queremos comprar
+  let remainingShares = newBuy.shares;
   let totalCost = 0;
-  let executedTrades: any[] = []; // detalhes de cada trade executado
+  let executedTrades: any[] = [];
 
   for (let sellOrder of matchingSellOrders) {
     if (remainingShares <= 0) break;
@@ -88,7 +77,6 @@ function matchLimitBuyOrder(newBuy: Order) {
     totalCost += tradeCost;
     remainingShares -= executedShares;
 
-    // Atualiza a ordem de venda consumida
     sellOrder.shares -= executedShares;
     sellOrder.amount = +(sellOrder.shares * sellOrder.price).toFixed(2);
     if (sellOrder.shares === 0) {
@@ -109,7 +97,6 @@ function matchLimitBuyOrder(newBuy: Order) {
   const executedSharesTotal = newBuy.shares - remainingShares;
   const averagePrice = executedSharesTotal > 0 ? totalCost / executedSharesTotal : 0;
 
-  // Prepara o resultado do matching
   const result: any = {
     newOrderId: newBuy.id,
     executedShares: executedSharesTotal,
@@ -118,14 +105,12 @@ function matchLimitBuyOrder(newBuy: Order) {
   };
 
   if (remainingShares > 0) {
-    // Ordem não foi totalmente preenchida: atualiza a ordem com o restante e marca como "partial"
     newBuy.shares = remainingShares;
     newBuy.amount = +(remainingShares * newBuy.price).toFixed(2);
     newBuy.status = 'partial';
     result.remainingOrder = newBuy;
     console.log(`[matchLimitBuyOrder] Ordem de compra ${newBuy.id} parcialmente executada. Restam ${remainingShares} ações.`);
   } else {
-    // Ordem totalmente preenchida
     newBuy.status = 'executed';
     result.remainingOrder = null;
     console.log(`[matchLimitBuyOrder] Ordem de compra ${newBuy.id} totalmente executada.`);
@@ -136,19 +121,15 @@ function matchLimitBuyOrder(newBuy: Order) {
 
 /**
  * Função que executa o matching para uma ordem limite de VENDA.
- * Verifica se há ordens de compra (limit) com preço maior ou igual ao preço da venda.
- * Durante o matching, as ordens consumidas são atualizadas de forma semelhante ao match de compra.
  */
 function matchLimitSellOrder(newSell: Order) {
   console.log(`[matchLimitSellOrder] Iniciando matching para ordem de VENDA:`, newSell);
-  // Filtra as ordens de compra que podem casar: mesmo ativo e preço maior ou igual ao preço da venda
   let matchingBuyOrders = orderBook.filter(
     o => o.type === 'buy' && o.asset === newSell.asset && o.price >= newSell.price
   );
-  // Ordena as ordens de compra do maior para o menor preço
   matchingBuyOrders.sort((a, b) => b.price - a.price);
 
-  let remainingShares = newSell.shares; // quantidade que queremos vender
+  let remainingShares = newSell.shares;
   let totalRevenue = 0;
   let executedTrades: any[] = [];
 
@@ -156,12 +137,10 @@ function matchLimitSellOrder(newSell: Order) {
     if (remainingShares <= 0) break;
     const availableShares = buyOrder.shares;
     const executedShares = Math.min(remainingShares, availableShares);
-    // Para a venda, o trade é executado pelo preço da ordem de compra (ou pode ser negociado pelo preço da venda)
     const tradeRevenue = executedShares * buyOrder.price;
     totalRevenue += tradeRevenue;
     remainingShares -= executedShares;
 
-    // Atualiza a ordem de compra consumida
     buyOrder.shares -= executedShares;
     buyOrder.amount = +(buyOrder.shares * buyOrder.price).toFixed(2);
     if (buyOrder.shares === 0) {
@@ -207,7 +186,6 @@ function matchLimitSellOrder(newSell: Order) {
 
 /**
  * Rota para COMPRA a mercado de HYPE
- * (Mantida para execução imediata com liquidez já existente no orderBook)
  */
 app.post('/market-buy-hype', (req, res) => {
   console.log(`[Route /market-buy-hype] Requisição recebida:`, req.body);
@@ -263,7 +241,6 @@ app.post('/market-sell-hype', (req, res) => {
     console.log(`[Route /market-sell-hype] Erro: ${result.error}`);
     return res.status(400).json(result);
   }
-  // Remove do orderBook as ordens que foram totalmente executadas
   orderBook = orderBook.filter(o => o.status !== 'executed');
   console.log(`[Route /market-sell-hype] Ordem a mercado executada:`, result);
   res.status(201).json(result);
@@ -291,8 +268,6 @@ app.post('/market-sell-flop', (req, res) => {
 
 /**
  * Rota para criação de uma ordem LIMITE de COMPRA.
- * Se houver matching, a execução é realizada e, se houver remanescente da ordem,
- * este é adicionado ao orderBook. Em ambos os casos, as ordens de compra são reordenadas.
  */
 app.post('/buy', (req, res) => {
   console.log(`[Route /buy] Requisição recebida:`, req.body);
@@ -316,7 +291,6 @@ app.post('/buy', (req, res) => {
     status: 'open'
   };
 
-  // Verifica se existe alguma ordem de venda que possa casar (preço menor ou igual)
   const matchingSell = orderBook.find(
     o => o.type === 'sell' && o.asset === asset && o.price <= price
   );
@@ -324,18 +298,15 @@ app.post('/buy', (req, res) => {
   if (matchingSell) {
     console.log(`[Route /buy] Encontrada ordem de venda compatível. Executando matching a mercado.`);
     const result = matchLimitBuyOrder(newOrder);
-    // Remove as ordens que foram totalmente executadas do orderBook
     orderBook = orderBook.filter(o => o.status !== 'executed');
     if (result.remainingOrder) {
       orderBook.push(result.remainingOrder);
-      // Atualiza as ordens de compra com o sortOrders
       updateSortedOrders('buy');
       console.log(`[Route /buy] Remanescente da ordem de compra adicionada e ordenada:`, result.remainingOrder);
     }
     return res.status(201).json(result);
   } else {
     orderBook.push(newOrder);
-    // Atualiza as ordens de compra com o sortOrders
     updateSortedOrders('buy');
     console.log(`[Route /buy] Ordem de compra adicionada e ordenada:`, newOrder);
     return res.status(201).json(newOrder);
@@ -344,8 +315,6 @@ app.post('/buy', (req, res) => {
 
 /**
  * Rota para criação de uma ordem LIMITE de VENDA.
- * Se houver matching, a execução é realizada e, se houver remanescente da ordem,
- * este é adicionado ao orderBook. Em ambos os casos, as ordens de venda são reordenadas.
  */
 app.post('/sell', (req, res) => {
   console.log(`[Route /sell] Requisição recebida:`, req.body);
@@ -370,7 +339,6 @@ app.post('/sell', (req, res) => {
     status: 'open'
   };
 
-  // Verifica se há ordem de compra com preço maior ou igual
   const matchingBuy = orderBook.find(
     o => o.type === 'buy' && o.asset === asset && o.price >= price
   );
@@ -381,14 +349,12 @@ app.post('/sell', (req, res) => {
     orderBook = orderBook.filter(o => o.status !== 'executed');
     if (result.remainingOrder) {
       orderBook.push(result.remainingOrder);
-      // Atualiza as ordens de venda com o sortOrders
       updateSortedOrders('sell');
       console.log(`[Route /sell] Remanescente da ordem de venda adicionada e ordenada:`, result.remainingOrder);
     }
     return res.status(201).json(result);
   } else {
     orderBook.push(newOrder);
-    // Atualiza as ordens de venda com o sortOrders
     updateSortedOrders('sell');
     console.log(`[Route /sell] Ordem de venda adicionada e ordenada:`, newOrder);
     return res.status(201).json(newOrder);
@@ -402,11 +368,6 @@ app.get('/orders', (_req, res) => {
   console.log(`[Route /orders] Listando ordens ativas.`);
   const activeOrders = orderBook.filter(o => o.status !== 'executed');
   res.json(activeOrders);
-});
-
-// Inicia o servidor e exibe uma mensagem de confirmação
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
 });
 
 /* 
@@ -568,7 +529,6 @@ const executeMarketSellHype = (shares: number) => {
   let totalRevenue = 0;
   let executedTrades: any[] = [];
 
-  // Filtra as ordens de compra de HYPE, ordenando por preço decrescente (maior preço primeiro)
   const buyOrders = sortOrders(orderBook, 'buy').filter(order => order.asset === 'HYPE');
   console.log(`[executeMarketSellHype] Ordens de compra de HYPE disponíveis:`, buyOrders);
 
@@ -580,7 +540,6 @@ const executeMarketSellHype = (shares: number) => {
     totalRevenue += tradeRevenue;
     remainingShares -= executedShares;
 
-    // Atualiza a ordem de compra consumida
     order.shares -= executedShares;
     order.amount = +(order.shares * order.price).toFixed(2);
     if (order.shares === 0) {
@@ -619,7 +578,6 @@ const executeMarketSellFlop = (shares: number) => {
   let totalRevenue = 0;
   let executedTrades: any[] = [];
 
-  // Filtra as ordens de compra de FLOP, ordenando por preço decrescente (maior preço primeiro)
   const buyOrders = sortOrders(orderBook, 'buy').filter(order => order.asset === 'FLOP');
   console.log(`[executeMarketSellFlop] Ordens de compra de FLOP disponíveis:`, buyOrders);
 
@@ -631,7 +589,6 @@ const executeMarketSellFlop = (shares: number) => {
     totalRevenue += tradeRevenue;
     remainingShares -= executedShares;
 
-    // Atualiza a ordem de compra consumida
     order.shares -= executedShares;
     order.amount = +(order.shares * order.price).toFixed(2);
     if (order.shares === 0) {
@@ -660,3 +617,8 @@ const executeMarketSellFlop = (shares: number) => {
   console.log(`[executeMarketSellFlop] Venda concluída: ExecutedShares: ${executedSharesTotal}, TotalRevenue: ${totalRevenue}, AveragePrice: ${+averagePrice.toFixed(4)}`);
   return { executedShares: executedSharesTotal, totalRevenue, averagePrice: +averagePrice.toFixed(4), trades: executedTrades };
 };
+
+// Inicia o servidor e exibe uma mensagem de confirmação
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});
