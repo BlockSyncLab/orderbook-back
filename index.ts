@@ -2,11 +2,16 @@ import express from 'express';
 import cors from 'cors';
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
-// Habilita CORS e o parser de JSON
+// Habilita CORS e o parser de JSON para o corpo das requisições
 app.use(cors());
 app.use(express.json());
+
+// Rota de Health Check – utilizada pelos serviços de deploy
+app.get('/health', (_req, res) => {
+  res.status(200).send('OK');
+});
 
 // Interface que define a estrutura de uma ordem.
 interface Order {
@@ -24,22 +29,21 @@ interface Order {
 let orderBook: Order[] = [];
 
 /**
- * Ordena as ordens conforme o tipo:
- * - Para vendas: menor preço primeiro.
- * - Para compras: maior preço primeiro.
+ * Função para ordenar ordens conforme o tipo:
+ * - Ordens de venda: em ordem crescente de preço (menor preço primeiro).
+ * - Ordens de compra: em ordem decrescente de preço (maior preço primeiro).
  */
 const sortOrders = (orders: Order[], orderType: 'buy' | 'sell') => {
   const sorted = orders
     .filter(order => order.type === orderType)
-    .sort((a, b) =>
-      orderType === 'sell' ? a.price - b.price : b.price - a.price
-    );
+    .sort((a, b) => orderType === 'sell' ? a.price - b.price : b.price - a.price);
   console.log(`[sortOrders] Ordenadas ${orderType} orders:`, sorted);
   return sorted;
 };
 
 /**
- * Atualiza o orderBook, garantindo a ordenação das ordens do tipo informado.
+ * Função auxiliar para atualizar o orderBook, garantindo que as ordens do tipo informado
+ * sejam sempre ordenadas de acordo com a função sortOrders.
  */
 const updateSortedOrders = (orderType: 'buy' | 'sell') => {
   if (orderType === 'buy') {
@@ -54,8 +58,10 @@ const updateSortedOrders = (orderType: 'buy' | 'sell') => {
 };
 
 /**
- * Matching para ordem limite de COMPRA.
- * Atualiza as ordens de venda consumidas (parcial ou totalmente).
+ * Função que executa o matching para uma ordem limite de COMPRA.
+ * Se houver ordens de venda com preço menor ou igual ao preço da ordem de compra,
+ * o sistema executa a ordem como se fosse a mercado.
+ * Durante o matching, as ordens consumidas são atualizadas (parcial ou totalmente).
  */
 function matchLimitBuyOrder(newBuy: Order) {
   console.log(`[matchLimitBuyOrder] Iniciando matching para ordem de COMPRA:`, newBuy);
@@ -121,8 +127,8 @@ function matchLimitBuyOrder(newBuy: Order) {
 }
 
 /**
- * Matching para ordem limite de VENDA.
- * Atualiza as ordens de compra consumidas (parcial ou totalmente).
+ * Função que executa o matching para uma ordem limite de VENDA.
+ * Verifica se há ordens de compra com preço maior ou igual ao preço da venda e atualiza-as.
  */
 function matchLimitSellOrder(newSell: Order) {
   console.log(`[matchLimitSellOrder] Iniciando matching para ordem de VENDA:`, newSell);
@@ -540,7 +546,7 @@ app.post('/market-sell-hype', (req, res) => {
     console.log(`[Route /market-sell-hype] Erro: ${result.error}`);
     return res.status(400).json(result);
   }
-  // Remove ordens totalmente executadas
+  // Remove do orderBook as ordens que foram totalmente executadas
   orderBook = orderBook.filter(o => o.status !== 'executed');
   console.log(`[Route /market-sell-hype] Ordem a mercado executada:`, result);
   res.status(201).json(result);
@@ -585,6 +591,7 @@ app.post('/buy', (req, res) => {
     status: 'open'
   };
 
+  // Verifica se existe alguma ordem de venda que possa casar (preço menor ou igual)
   const matchingSell = orderBook.find(
     o => o.type === 'sell' && o.asset === asset && o.price <= price
   );
@@ -592,6 +599,7 @@ app.post('/buy', (req, res) => {
   if (matchingSell) {
     console.log(`[Route /buy] Encontrada ordem de venda compatível. Executando matching a mercado.`);
     const result = matchLimitBuyOrder(newOrder);
+    // Remove as ordens que foram totalmente executadas do orderBook
     orderBook = orderBook.filter(o => o.status !== 'executed');
     if (result.remainingOrder) {
       orderBook.push(result.remainingOrder);
@@ -630,6 +638,7 @@ app.post('/sell', (req, res) => {
     status: 'open'
   };
 
+  // Verifica se há ordem de compra com preço maior ou igual
   const matchingBuy = orderBook.find(
     o => o.type === 'buy' && o.asset === asset && o.price >= price
   );
@@ -658,7 +667,7 @@ app.get('/orders', (_req, res) => {
   res.json(activeOrders);
 });
 
-// Inicia o servidor
+// Inicia o servidor e exibe uma mensagem de confirmação
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
